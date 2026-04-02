@@ -1,0 +1,16 @@
+# Server and local execution
+__pycache__/
+*.pyc
+.env
+
+# Environments
+venv/
+env/
+.venv/
+
+# PyTorch
+*.pt
+*.pth
+
+# Hugging Face
+.git/

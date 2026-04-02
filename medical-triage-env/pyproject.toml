@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medical-triage-env"
+version = "0.1.0"
+description = "Meta PyTorch Hackathon: Medical Triage Nurse OpenEnv"
+authors = [
+    {name = "AI Engineer"}
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "websockets>=11.0.3",
+    "openai>=1.0.0",
+    "openenv @ git+https://github.com/meta-pytorch/OpenEnv.git"
+]

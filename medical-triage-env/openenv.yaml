@@ -1,0 +1,29 @@
+name: medical-triage-env
+version: "0.1.0"
+description: >
+  An OpenEnv environment where an AI agent acts as a clinical ER Triage Nurse.
+  The agent must assess patients, order diagnostics, assign triage levels, administer
+  treatments, and handle life-threatening drug interactions — all under time pressure.
+author: "AI Engineer"
+tasks:
+  - id: easy
+    description: "Single STEMI patient — identify and admit to Cardiology"
+    difficulty: easy
+    max_steps: 15
+  - id: medium
+    description: "Sepsis patient with Penicillin allergy + Opioid Overdose — avoid fatal interactions"
+    difficulty: medium
+    max_steps: 20
+  - id: hard
+    description: "Mass casualty — Hemorrhagic Shock, Stroke, Asthmatic child — prioritize correctly"
+    difficulty: hard
+    max_steps: 25
+actions:
+  - assess
+  - order_test
+  - treat
+  - triage
+  - admit
+  - discharge
+  - wait
+reward_range: [0.0, 1.0]
