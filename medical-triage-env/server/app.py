@@ -3,57 +3,130 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from server.env import MedicalTriageEnv
 from models import IncidentAction, IncidentObservation
 
-try:
-    from openenv import create_fastapi_app
-    app = create_fastapi_app(MedicalTriageEnv(), IncidentAction, IncidentObservation)
-except ImportError:
-    app = FastAPI(title="Medical Triage OpenEnv", version="0.1.0")
-    print("Warning: openenv not found, using raw FastAPI. WebSocket unavailable.")
+# ---------------------------------------------------------------------------
+# App & middleware
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="Medical Triage OpenEnv",
+    version="0.1.0",
+    description="ER Triage Nurse environment — OpenEnv spec compliant",
+)
 
-    _env = MedicalTriageEnv()
-    _last_obs = {}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Singleton environment + action log
+# ---------------------------------------------------------------------------
+_env = MedicalTriageEnv()
+_last_obs: dict = {}
+_action_log: list = []
+
+# ---------------------------------------------------------------------------
+# OpenEnv Core endpoints: /reset  /step  /state
+# ---------------------------------------------------------------------------
+
+@app.post("/reset")
+def reset(config: dict = {}):
+    """Reset the environment. Pass {"difficulty": "easy"|"medium"|"hard"}."""
+    global _last_obs, _action_log
     _action_log = []
+    diff = config.get("difficulty", os.getenv("ENV_DIFFICULTY", "easy"))
+    obs = _env.reset(difficulty=diff)
+    _last_obs = obs.model_dump()
+    _action_log.append({"step": 0, "action": "reset", "feedback": "Environment initialized.", "reward": None})
+    return _last_obs
 
-    @app.post("/reset")
-    def reset(config: dict = {}):
-        global _last_obs, _action_log
-        _action_log = []
-        diff = config.get("difficulty", "medium")
-        obs = _env.reset(difficulty=diff)
-        _last_obs = obs.model_dump()
-        _action_log.append({"step": 0, "action": "reset", "feedback": "Environment initialized."})
-        return _last_obs
 
-    @app.post("/step")
-    def step(action_dict: dict):
-        global _last_obs
-        act = IncidentAction(**action_dict)
-        obs, reward, done, _ = _env.step(act)
-        _last_obs = obs.model_dump()
-        _last_obs["reward"] = round(reward, 4)
-        _last_obs["done"] = done
-        _action_log.append({
-            "step": obs.current_step,
-            "action": f"{act.action_type}({act.patient_id or ''} {act.target or ''})",
-            "feedback": obs.action_feedback,
-            "reward": round(reward, 4)
-        })
-        if len(_action_log) > 30:
-            _action_log.pop(0)
-        return _last_obs
+@app.post("/step")
+def step(action_dict: dict):
+    """Execute one action. Body: {action_type, patient_id?, target?}"""
+    global _last_obs
+    act = IncidentAction(**action_dict)
+    obs, reward, done, info = _env.step(act)
+    _last_obs = obs.model_dump()
+    _last_obs["reward"] = round(float(reward), 4)
+    _last_obs["done"] = done
+    _action_log.append({
+        "step": obs.current_step,
+        "action": f"{act.action_type}({act.patient_id or ''} {act.target or ''})".strip(),
+        "feedback": obs.action_feedback,
+        "reward": round(float(reward), 4),
+    })
+    if len(_action_log) > 50:
+        _action_log.pop(0)
+    return _last_obs
 
-    @app.get("/dashboard_data")
-    def dashboard_data():
-        return JSONResponse({"obs": _last_obs, "log": _action_log[-10:]})
+
+@app.get("/state")
+def get_state():
+    """Return the current episode state (OpenEnv state() contract)."""
+    s = _env.state()
+    return s.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Discovery / metadata endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok", "message": "Medical Triage Env is running"}
+def health():
+    return {"status": "ok", "message": "Medical Triage Env is running", "version": "0.1.0"}
+
+
+@app.get("/tasks")
+def list_tasks():
+    """List all 3 tasks with metadata (for openenv validate)."""
+    return {
+        "tasks": [
+            {
+                "id": "easy",
+                "difficulty": "easy",
+                "max_steps": 15,
+                "description": "Single STEMI patient — identify and admit to Cardiology",
+                "success_criteria": "Triage level 1, order ECG, treat with Aspirin, admit to Cardiology",
+                "expected_score_range": [0.70, 1.0],
+            },
+            {
+                "id": "medium",
+                "difficulty": "medium",
+                "max_steps": 20,
+                "description": "Sepsis (Penicillin allergy) + Opioid Overdose — avoid fatal interactions",
+                "success_criteria": "Avoid Penicillin for P-102, use Naloxone for P-108, admit both correctly",
+                "expected_score_range": [0.40, 0.80],
+            },
+            {
+                "id": "hard",
+                "difficulty": "hard",
+                "max_steps": 25,
+                "description": "Mass casualty: Hemorrhagic Shock + Stroke + Asthmatic child",
+                "success_criteria": "Prioritize P-104 (Level 1), avoid blood thinners, correct wards for all",
+                "expected_score_range": [0.20, 0.65],
+            },
+        ]
+    }
+
+
+@app.get("/dashboard_data")
+def dashboard_data():
+    """Live dashboard polling endpoint."""
+    return JSONResponse({"obs": _last_obs, "log": _action_log[-15:]})
+
+
+# ---------------------------------------------------------------------------
+# Live Dashboard UI
+# ---------------------------------------------------------------------------
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -61,8 +134,8 @@ DASHBOARD_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Medical Triage Commander</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>NexaCare ER — Medical Triage OpenEnv</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg:       #07090f;
@@ -124,7 +197,7 @@ DASHBOARD_HTML = """
   .stepbar-labels { display: flex; justify-content: space-between; font-size: 0.6rem; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
 
   .queue-list { padding: 12px 14px; flex: 1; overflow-y: auto; }
-  .queue-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; cursor: default; }
+  .queue-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
   .queue-item .pid { font-size: 0.65rem; font-family: var(--mono); color: var(--muted); }
   .queue-item .vsm { font-size: 0.7rem; margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
   .vsm-tag { background: #111824; border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; font-family: var(--mono); color: var(--muted); }
@@ -156,7 +229,6 @@ DASHBOARD_HTML = """
   .bed-pid { font-size: 0.7rem; font-family: var(--mono); color: var(--muted); }
   .bed-empty-msg { text-align: center; padding: 18px 0; font-size: 0.75rem; color: var(--border2); }
 
-  /* monitor-style vitals row */
   .vitals-monitor { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
   .vital-box { background: #060a10; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; }
   .vital-box.danger { border-color: var(--red); background: var(--red-bg); }
@@ -174,7 +246,7 @@ DASHBOARD_HTML = """
   .tp5 { background: #0d1f35; color: #74c0fc; border: 1px solid #1a4070; }
   .treatment-tag { font-size: 0.6rem; background: #0d1f35; border: 1px solid var(--border2); color: var(--accent); border-radius: 3px; padding: 2px 7px; font-family: var(--mono); }
 
-  /* ── BOTTOM BAR (alerts + log) ───────────────────────────── */
+  /* ── BOTTOM BAR ───────────────────────────────────────────── */
   .bottom-bar { height: 180px; border-top: 1px solid var(--border); display: flex; flex-shrink: 0; }
   .alerts-pane { width: 50%; border-right: 1px solid var(--border); overflow-y: auto; padding: 0 14px; }
   .log-pane    { flex: 1; overflow-y: auto; padding: 0 14px; }
@@ -187,7 +259,6 @@ DASHBOARD_HTML = """
   .alert-row .icon { margin-top: 1px; flex-shrink:0; }
   .alert-row.critical .msg { color: var(--red); }
   .alert-row.warn     .msg { color: var(--yellow); }
-  .alert-row.info     .msg { color: var(--muted); }
   .no-data { color: var(--border2); font-size: 0.72rem; padding: 12px 0; text-align: center; }
 
   .log-row { display: grid; grid-template-columns: 42px 1fr 56px; gap: 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.68rem; }
@@ -227,7 +298,7 @@ DASHBOARD_HTML = """
       <div class="sidebar-label">Episode</div>
       <div class="sidebar-stat"><span class="key">Step</span><span class="val" id="sv-step">—</span></div>
       <div class="sidebar-stat"><span class="key">Max Steps</span><span class="val" id="sv-max">—</span></div>
-      <div class="sidebar-stat"><span class="key">Step Reward</span><span class="val" id="sv-reward">—</span></div>
+      <div class="sidebar-stat"><span class="key">Last Reward</span><span class="val" id="sv-reward">—</span></div>
       <div class="stepbar-wrap">
         <div class="stepbar-track"><div class="stepbar-fill" id="step-fill" style="width:0%"></div></div>
         <div class="stepbar-labels"><span id="sl-left">0</span><span id="sl-right">—</span></div>
@@ -276,7 +347,7 @@ DASHBOARD_HTML = """
 
     <div class="bottom-bar">
       <div class="alerts-pane">
-        <div class="pane-header"><div class="dot"></div>Alerts & Vitals Warnings</div>
+        <div class="pane-header"><div class="dot"></div>Alerts &amp; Vitals Warnings</div>
         <div id="alerts-list"><div class="no-data">No alerts</div></div>
       </div>
       <div class="log-pane">
@@ -318,7 +389,6 @@ function renderBedCard(bedName, p) {
   const triHtml = tri ? `<span class="triage-pill ${tri[0]}">${tri[1]}</span>` : '';
   const txHtml = (p.treatments||[]).map(t=>`<span class="treatment-tag">${t}</span>`).join('');
   const testHtml = (p.tests_done||[]).map(t=>`<span class="treatment-tag" style="color:var(--muted)">${t}</span>`).join('');
-
   return `<div class="bed-card ${cls}">
     <div class="bed-header">
       <span class="bname">${bedName}</span>
@@ -337,7 +407,6 @@ function renderQueueItem(p) {
   return `<div class="queue-item"><div class="pid">${p.id}</div><div class="vsm">${vitals}</div></div>`;
 }
 
-let critCount = 0;
 let actionCount = 0;
 
 async function refresh() {
@@ -345,7 +414,7 @@ async function refresh() {
     const r = await fetch('/dashboard_data');
     if (!r.ok) return;
     const {obs, log} = await r.json();
-    if (!obs || !obs.current_step && obs.current_step !== 0) return;
+    if (!obs || (obs.current_step === undefined)) return;
 
     const step = obs.current_step ?? 0;
     const maxS = obs.max_steps || 0;
@@ -355,7 +424,6 @@ async function refresh() {
     const beds = obs.active_beds_summary || {};
     const alerts = obs.alerts || [];
 
-    // sidebar
     document.getElementById('sv-step').textContent   = step;
     document.getElementById('sv-max').textContent    = maxS;
     document.getElementById('sl-left').textContent   = step;
@@ -371,17 +439,14 @@ async function refresh() {
     document.getElementById('sv-queue').textContent = queue.length;
 
     actionCount = (log||[]).filter(l=>l.action!=='reset').length;
-    critCount   = alerts.filter(a=>a.includes('CRITICAL')).length;
+    const critCount = alerts.filter(a=>a.includes('CRITICAL')).length;
 
-    // status chip
     const chip = document.getElementById('status-chip');
     chip.textContent = done ? 'DONE' : step>0 ? 'LIVE' : 'READY';
     chip.className = 'chip ' + (done ? 'done' : step>0 ? 'live' : 'idle');
 
-    // episode id
     if (obs.episode_id) document.getElementById('ep-id').textContent = 'ep '+obs.episode_id;
 
-    // top stats
     document.getElementById('ms-beds').textContent    = occupiedCount;
     document.getElementById('ms-alerts').textContent  = critCount;
     document.getElementById('ms-actions').textContent = actionCount;
@@ -389,27 +454,20 @@ async function refresh() {
     rwEl.textContent = rStr;
     rwEl.style.color = reward > 0 ? 'var(--green)' : reward < 0 ? 'var(--red)' : 'var(--muted)';
 
-    // sidebar queue
     const ql = document.getElementById('queue-list');
     ql.innerHTML = queue.length ? queue.map(renderQueueItem).join('') : '<div class="empty-queue">Queue empty</div>';
 
-    // beds
     const bedHtml = Object.entries(beds).map(([b,p])=>renderBedCard(b,p)).join('');
-    document.getElementById('beds-area').innerHTML = bedHtml || '<div style="color:var(--border2);padding:40px;text-align:center;font-size:.8rem">No beds available</div>';
+    document.getElementById('beds-area').innerHTML = bedHtml || '<div style="color:var(--border2);padding:40px;text-align:center;font-size:.8rem">No beds</div>';
 
-    // alerts
     const al = document.getElementById('alerts-list');
     if (alerts.length) {
       al.innerHTML = [...alerts].reverse().map(a => {
         const isCrit = a.includes('CRITICAL');
-        const icon = isCrit ? '🔴' : '⚠️';
-        return `<div class="alert-row ${isCrit?'critical':'warn'}"><span class="icon">${icon}</span><span class="msg">${a}</span></div>`;
+        return `<div class="alert-row ${isCrit?'critical':'warn'}"><span class="icon">${isCrit?'🔴':'⚠️'}</span><span class="msg">${a}</span></div>`;
       }).join('');
-    } else {
-      al.innerHTML = '<div class="no-data">No alerts</div>';
-    }
+    } else { al.innerHTML = '<div class="no-data">No alerts</div>'; }
 
-    // log
     const ll = document.getElementById('log-list');
     if (log && log.length) {
       ll.innerHTML = [...log].reverse().map(e=>{
@@ -422,13 +480,10 @@ async function refresh() {
           <span class="log-rw ${rwClass}">${rwLabel}</span>
         </div>`;
       }).join('');
-    } else {
-      ll.innerHTML = '<div class="no-data">Awaiting agent…</div>';
-    }
+    } else { ll.innerHTML = '<div class="no-data">Awaiting agent…</div>'; }
 
-    // fatal errors count
     const fatalEl = document.getElementById('sv-fatal');
-    const hasFatal = (obs.alerts||[]).some(a=>a.includes('Fatal'));
+    const hasFatal = (obs.alerts||[]).some(a=>a.toLowerCase().includes('fatal'));
     fatalEl.textContent = hasFatal ? '⚠ YES' : '0';
     fatalEl.className = 'val ' + (hasFatal ? 'red':'green');
 
@@ -442,6 +497,12 @@ refresh();
 </html>
 """
 
+
 @app.get("/ui", response_class=HTMLResponse)
 def get_dashboard():
+    return DASHBOARD_HTML
+
+
+@app.get("/", response_class=HTMLResponse)
+def root():
     return DASHBOARD_HTML

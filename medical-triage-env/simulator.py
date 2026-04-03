@@ -6,6 +6,7 @@ class Simulator:
     def __init__(self, state: IncidentState):
         self.state = state
         self.action_feedback = ""
+        self.completed: dict = {}  # id -> Patient snapshot after discharge/admit
 
     def step(self, action: IncidentAction) -> None:
         self.state.current_step += 1
@@ -83,6 +84,9 @@ class Simulator:
         for bed, p in self.state.active_beds.items():
             if p and p.id == pid:
                 return p
+        # Also check completed (discharged/admitted) patients
+        if pid in self.completed:
+            return self.completed[pid]
         return None
 
     def _update_time(self):
@@ -144,6 +148,14 @@ class Simulator:
             # Save vitals snapshot for dashboard history
             patient.vitals_history.append(dict(patient.vitals))
             patient.vitals = new_vitals
+
+        # Save discharged patients to completed BEFORE removing them
+        for p in self.state.queue:
+            if p.discharged:
+                self.completed[p.id] = p
+        for bed, p in self.state.active_beds.items():
+            if p and p.discharged:
+                self.completed[p.id] = p
 
         # Remove discharged patients
         self.state.queue = [p for p in self.state.queue if not p.discharged]
