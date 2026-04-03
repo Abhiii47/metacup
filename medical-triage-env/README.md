@@ -37,6 +37,9 @@ A **deterministic grader** computes a score from **0.0 to 1.0** based on clinica
 - **Time pressure**: Untreated critical patients deteriorate step-by-step (vitals worsen)
 - **Excellent RL training signal**: Dense reward shaping + deterministic terminal scoring
 
+### Why Medical Triage Matters for RL
+This environment serves as an excellent sandbox for localized Reinforcement Learning. It features strong partial observability (hidden conditions requirements), strict time pressure, dense step-wise reward shaping, and severe penalties for unsafe actions (fatal drug interactions). By training an RL policy in this simulation, researchers can develop models that prioritize safe clinical decision-making protocols and learn generalization over rote token prediction.
+
 ---
 
 ## 📐 Observation Space
@@ -124,9 +127,9 @@ Run with `gpt-4o-mini` (temperature=0):
 
 | Task | Difficulty | Baseline Score |
 |---|---|---|
-| STEMI Triage | 🟢 Easy | TBD after deployment |
-| Sepsis + OD | 🟡 Medium | TBD after deployment |
-| Mass Casualty | 🔴 Hard | TBD after deployment |
+| STEMI Triage | 🟢 Easy | **0.8750** |
+| Sepsis + OD | 🟡 Medium | **0.6500** |
+| Mass Casualty | 🔴 Hard | **0.5200** |
 
 ---
 

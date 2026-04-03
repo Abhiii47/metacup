@@ -28,6 +28,9 @@ app.add_middleware(
 
 # ---------------------------------------------------------------------------
 # Singleton environment + action log
+# Note: For hackathon demo simplicity, we use a singleton global _env.
+# This prevents thread-safe multi-agent concurrency but is adequate for 
+# a single-agent evaluation dashboard session.
 # ---------------------------------------------------------------------------
 _env = MedicalTriageEnv()
 _last_obs: dict = {}

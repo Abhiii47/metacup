@@ -2,11 +2,11 @@ import copy
 from typing import Dict, Any
 
 EVALUATIONS_DB = {
-    "ECG": {"P-101": "ST elevation in leads II, III, aVF (Inferior STEMI).", "P-102": "Normal Sinus Rhythm.", "P-103": "Sinus Tachycardia."},
-    "Blood Test": {"P-101": "Troponin highly elevated.", "P-102": "WBC 18.0 (High), Lactate 4.5 (High).", "P-103": "Normal limits."},
-    "X-Ray": {"P-103": "No fracture, significant soft tissue swelling."},
-    "CT Scan": {"P-107": "Acute ischemic stroke in territory of MCA.", "P-104": "Massive internal bleeding detected."},
-    "Tox Screen": {"P-108": "Positive for Opioids and Benzodiazepines."}
+    "ECG": {"STEMI": "ST elevation in leads II, III, aVF (Inferior STEMI).", "Sepsis": "Normal Sinus Rhythm.", "Ankle Sprain": "Sinus Tachycardia."},
+    "Blood Test": {"STEMI": "Troponin highly elevated.", "Sepsis": "WBC 18.0 (High), Lactate 4.5 (High).", "Ankle Sprain": "Normal limits."},
+    "X-Ray": {"Ankle Sprain": "No fracture, significant soft tissue swelling."},
+    "CT Scan": {"Stroke": "Acute ischemic stroke in territory of MCA.", "Hemorrhagic Shock": "Massive internal bleeding detected."},
+    "Tox Screen": {"Opioid Overdose": "Positive for Opioids and Benzodiazepines."}
 }
 
 INTERACTIONS_DB = {
@@ -85,5 +85,46 @@ SCENARIOS: Dict[str, Any] = {
     }
 }
 
+import random
+
 def get_scenario(difficulty: str) -> Dict[str, Any]:
-    return copy.deepcopy(SCENARIOS.get(difficulty.lower(), SCENARIOS["easy"]))
+    scenario = copy.deepcopy(SCENARIOS.get(difficulty.lower(), SCENARIOS["easy"]))
+    
+    # Apply +/- 5% jitter to vitals
+    for patient in scenario["patients"]:
+        v = patient["vitals"]
+        
+        if "HR" in v:
+            try:
+                hr = int(v["HR"].split("/")[0])
+                jitter = random.uniform(0.95, 1.05)
+                v["HR"] = str(max(30, min(200, int(hr * jitter))))
+            except ValueError:
+                pass
+
+        if "O2" in v:
+            try:
+                o2 = int(v["O2"].replace("%", ""))
+                jitter = random.uniform(0.95, 1.05)
+                v["O2"] = f"{max(60, min(100, int(o2 * jitter)))}%"
+            except ValueError:
+                pass
+                
+        if "BP" in v:
+            try:
+                sys, dia = map(int, v["BP"].split("/"))
+                j_sys = random.uniform(0.95, 1.05)
+                j_dia = random.uniform(0.95, 1.05)
+                v["BP"] = f"{max(40, int(sys * j_sys))}/{max(30, int(dia * j_dia))}"
+            except ValueError:
+                pass
+                
+        if "Temp" in v:
+            try:
+                temp = float(v["Temp"])
+                jitter = random.uniform(0.95, 1.05)
+                v["Temp"] = f"{max(34.0, min(42.0, temp * jitter)):.1f}"
+            except ValueError:
+                pass
+                
+    return scenario

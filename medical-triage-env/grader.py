@@ -144,4 +144,5 @@ def grade_task(task_id: str, state: IncidentState, all_patients_history: list) -
     Grade a specific task by ID. Thin wrapper around grade() that logs context.
     Returns a float in [0.0, 1.0].
     """
+    print(f"[GRADE] task={task_id}", flush=True)
     return grade(state, all_patients_history)

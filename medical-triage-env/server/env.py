@@ -154,6 +154,14 @@ class MedicalTriageEnv:
             alerts=s.alerts[-5:],
         )
 
+    def render(self) -> str:
+        """
+        Return a visualization of the environment state.
+        Meets the OpenEnv spec by returning the full DASHBOARD_HTML template.
+        """
+        from .app import DASHBOARD_HTML
+        return DASHBOARD_HTML
+
     def get_state(self) -> IncidentState:
         """Return the raw internal IncidentState (for testing/debugging)."""
         return self._state

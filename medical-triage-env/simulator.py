@@ -34,7 +34,7 @@ class Simulator:
         elif action.action_type == "order_test":
             if action.target in EVALUATIONS_DB:
                 patient.tests_ordered.append(action.target)
-                result = EVALUATIONS_DB[action.target].get(p_id, "Normal.")
+                result = EVALUATIONS_DB[action.target].get(patient.hidden_condition, "Normal.")
                 patient.test_results[action.target] = result
                 self.action_feedback = f"Ordered {action.target} for {p_id}. Result: {result}"
             else:
@@ -75,7 +75,18 @@ class Simulator:
         else:
             self.action_feedback = f"Unknown action type: {action.action_type}"
 
+        if patient and patient.discharged:
+            self._move_to_completed(patient)
+
         self._update_time()
+
+    def _move_to_completed(self, patient: Patient):
+        self.completed[patient.id] = patient
+        if patient in self.state.queue:
+            self.state.queue.remove(patient)
+        for bed, p in self.state.active_beds.items():
+            if p and p.id == patient.id:
+                self.state.active_beds[bed] = None
 
     def _get_patient(self, pid: str) -> Patient:
         for p in self.state.queue:
@@ -149,19 +160,7 @@ class Simulator:
             patient.vitals_history.append(dict(patient.vitals))
             patient.vitals = new_vitals
 
-        # Save discharged patients to completed BEFORE removing them
-        for p in self.state.queue:
-            if p.discharged:
-                self.completed[p.id] = p
-        for bed, p in self.state.active_beds.items():
-            if p and p.discharged:
-                self.completed[p.id] = p
-
-        # Remove discharged patients
-        self.state.queue = [p for p in self.state.queue if not p.discharged]
-        for bed, p in self.state.active_beds.items():
-            if p and p.discharged:
-                self.state.active_beds[bed] = None
+        # Note: logic for moving discharged patients out is now immediately handled in step()
 
         # Move queue to beds
         empty_beds = [b for b, p in self.state.active_beds.items() if p is None]
